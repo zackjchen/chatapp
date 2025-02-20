@@ -1,0 +1,3 @@
+server:
+  chat_server: "http://localhost:6688"
+  notify_server: "http://localhost:6687"

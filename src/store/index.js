@@ -1,7 +1,7 @@
 import { createStore } from 'vuex';
 import axios from 'axios';
 import { jwtDecode } from "jwt-decode";
-import { getUrlBase } from '../utils';
+import { getUrlBase,initSSE } from '../utils';
 
 async function loadState(response, commit) {
   const token = response.data.token;
@@ -16,7 +16,7 @@ async function loadState(response, commit) {
       },
     });
     const users = chatResp.data;
-    console.log('users', users);
+    console.log("users",users);
     
     const usersMap = {};
     users.forEach((user) => {
@@ -58,8 +58,12 @@ export default createStore({
     channels: [],       // List of channels
     messages: {},       // Messages hashmap, keyed by channel ID
     users:{},           // Users hashmap, keyed by user ID
+    activeChannel: null, // Active channel
   },
   mutations: {
+    setSSE(state, sse) {
+      state.sse = sse;
+    },
     setUser(state, user) {
       state.user = user;
     },
@@ -72,8 +76,8 @@ export default createStore({
     setChannels(state, channels) {
       state.channels = channels;
     },
-    setMessages(state, messages) {
-      state.messages = messages;
+    setMessages(state, { channelId, messages }) {
+      state.messages[channelId] = messages;    
     },
     setUsers(state, users) {
       state.users = users;
@@ -84,10 +88,15 @@ export default createStore({
     },
     addMessage(state, { channelId, message }) {
       if (state.messages[channelId]) {
-        state.messages[channelId].push(message);
+        state.messages[channelId].unshift(message);
       } else {
         state.messages[channelId] = [message];
       }
+    },
+    setActiveChannel(state, channelID) {
+      const activeChannel = state.channels.find((c) => c.id === channelID);
+      
+      state.activeChannel = activeChannel;
     },
     loadUserState(state) {
       const storedUser = localStorage.getItem('user');
@@ -117,7 +126,22 @@ export default createStore({
       }
     },
   },
+
+
   actions: {
+    initSSE({ state, commit }) {
+      if (state.sse) {
+        state.sse.close();
+      }
+      const sse = initSSE(this);
+      commit('setSSE', sse);
+    },
+    closeSSE({ state, commit }) {
+      if (state.sse) {
+        state.sse.close();
+        commit('setSSE', null);
+      }
+    },
     async signup({ commit }, { email, fullname, password, workspace }) {
       try {
         const response = await axios.post(`${getUrlBase()}/signup`, {
@@ -134,6 +158,9 @@ export default createStore({
         console.error('Signup failed:', error);
         throw error;
       }
+    },
+    setActiveChannel({ commit }, channel) {
+      commit('setActiveChannel', channel);
     },
     async signin({ commit }, { email, password }) {
       try {
@@ -162,6 +189,9 @@ export default createStore({
       commit('setWorkspace', '');
       commit('setChannels', []);
       commit('setMessages', {});
+
+      // close SSE
+      this.dispatch('closeSSE');
     },
     addChannel({ commit }, channel) {
       commit('addChannel', channel);
@@ -170,14 +200,58 @@ export default createStore({
       localStorage.setItem('channels', JSON.stringify(this.state.channels));
       localStorage.setItem('messages', JSON.stringify(this.state.messages));
     },
+    async fetchMessagesForChannel({ state, commit }, channelId) {
+      if (!state.messages[channelId] || state.messages[channelId].length === 0) {
+        try {
+          const response = await axios.get(`${getUrlBase()}/chat/${channelId}/messages`, {
+            headers: {
+              Authorization: `Bearer ${state.token}`,
+            },
+          });
+          /* We should conver sender_id to user object
+          [
+            {
+              "id": 1,
+              "chat_id": 1,
+              "sender_id": 1,
+              "content": "Hello, World!",
+              "files": [],
+              "created_at": "2024-08-18T04:07:54.087786Z"
+            }
+          ]
+          */
+          let messages = response.data;
+          commit('setMessages', { channelId, messages });
+        } catch (error) {
+          console.error(`Failed to fetch messages for channel ${channelId}:`, error);
+        }
+      }
+    },
+    async sendMessage({ state, commit }, payload) {
+      try {
+        const response = await axios.post(`${getUrlBase()}/chat/${payload.chatId}`, payload, {
+          headers: {
+            Authorization: `Bearer ${state.token}`,
+          },
+        });
+        console.log('Message sent:', response.data);
+        // commit('addMessage', { channelId: payload.chatId, message: response.data });
+      } catch (error) {
+        console.error('Failed to send message:', error);
+        throw error;
+      }
+    },
     addMessage({ commit }, { channelId, message }) {
       commit('addMessage', { channelId, message });
 
       // Update the messages in local storage
-      localStorage.setItem('messages', JSON.stringify(this.state.messages));
+      // localStorage.setItem('messages', JSON.stringify(this.state.messages));
     },
     loadUserState({ commit }) {
       commit('loadUserState');
+      if (this.state.token) {
+        this.dispatch('initSSE');
+      }
     },
   },
   getters: {
@@ -187,6 +261,9 @@ export default createStore({
     getUser(state) {
       return state.user;
     },
+    getUserById: (state) => (id) => {
+      return state.users[id];
+    },
     getWorkspace(state) {
       return state.workspace;
     },
@@ -194,6 +271,8 @@ export default createStore({
       return state.channels.filter((channel) => channel.type !== 'single');
     },
     getSingleChannels(state) {
+      console.log("state",state.users);
+      
       const channels = state.channels.filter((channel) => channel.type === 'single');
       return channels.map((channel) => {               
         const id = channel.members.filter((member) => member !== state.user.id)[0];
@@ -204,5 +283,14 @@ export default createStore({
     getChannelMessages: (state) => (channelId) => {
       return state.messages[channelId] || [];
     },
+    getMessagesForActiveChannel(state) {
+      if (!state.activeChannel) {
+        return [];
+      }      
+      
+      const messages = state.messages[state.activeChannel.id];
+
+      return messages || []
+    }
   },
 });

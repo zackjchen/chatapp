@@ -18,8 +18,8 @@
     <div class="channels">
       <h2>Channels</h2>
       <ul>
-        <li v-for="channel in channels" :key="channel.id">
-           {{ channel.name }}
+        <li v-for="channel in channels" :key="channel.id" @click="selectChannel(channel.id)" :class="{ active: channel.id === activeChannelId }">
+          # {{ channel.name }}
         </li>
       </ul>
     </div>
@@ -28,8 +28,8 @@
       <h2>Direct Messages</h2>
       <!-- Example of Direct Messages; this could be implemented similarly to channels if needed -->
       <ul>
-        <li v-for="c in singleChannels" :key="c.id">
-          <img :src="`https://ui-avatars.com/api/?name=${c.recipient.fullname.replace(' ','+')}`" class="avatar" alt="Avatar" /> {{ c.recipient.fullname }}
+        <li v-for="channel in singleChannels" :key="channel.id" @click="selectChannel(channel.id)" :class="{ active: channel.id === activeChannelId }" >
+          <img :src="`https://ui-avatars.com/api/?name=${channel.recipient.fullname.replace(' ','+')}`" class="avatar" alt="Avatar" /> {{ channel.recipient.fullname }}
         </li>
       </ul>
     </div>
@@ -60,6 +60,8 @@ export default {
     singleChannels() {
       // Placeholder for direct messages, if needed.
       // This could be another state managed by Vuex.
+      console.log(this.$store.getters.getSingleChannels);
+      
       return this.$store.getters.getSingleChannels;
     },
   },
@@ -83,6 +85,9 @@ export default {
         name: `Channel ${this.channels.length + 1}`,
       };
       this.$store.dispatch('addChannel', newChannel);
+    },
+    selectChannel(channel) {
+      this.$store.dispatch('setActiveChannel', channel);
     },
     mounted() {
       document.addEventListener('click', this.handleOutsideClick);
@@ -204,6 +209,11 @@ export default {
 .channels li:hover {
   background-color: #3a3e44;
 }
+/* Active channel styling */
+.channels li.active {
+  background-color: #5865f2; /* Highlight color for active channel */
+  color: #ffffff;
+}
 
 /* Direct Messages section */
 .direct-messages h2 {
@@ -229,6 +239,11 @@ export default {
 
 .direct-messages li:hover {
   background-color: #3a3e44;
+}
+/* Active channel styling */
+.direct-messages li.active {
+  background-color: #5865f2; /* Highlight color for active channel */
+  color: #ffffff;
 }
 
 .avatar {
